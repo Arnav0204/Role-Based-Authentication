@@ -5,21 +5,82 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	models "role-based-auth/auth/models"
+	"time"
 
+	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func Login(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+var SecretKey []byte
 
+func init() {
+	SecretKey = []byte(os.Getenv("SECRET_KEY"))
+}
+func Login(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	var req models.LoginRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, "unable to decode login request", http.StatusBadRequest)
+	}
+
+	if req.Email == "" || req.Password == "" {
+		w.Write([]byte("all fields required"))
+		return
+	}
+
+	//fetch user from database on email
+	var retrivedUser *models.HashedUser
+	retrivedUser, err = FetchUser(db, req.Email)
+	if err != nil {
+		log.Println("Error fetching user:", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	//check for empty response
+	if retrivedUser == nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	// Compare the hashed password with the plain-text password from the request
+	passwordCompaisonErr := bcrypt.CompareHashAndPassword([]byte(retrivedUser.HashedPassword), []byte(req.Password))
+	if passwordCompaisonErr != nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	claims := jwt.MapClaims{
+		"email": retrivedUser.Email,
+		"role":  retrivedUser.Role,
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
+	}
+
+	// Create and sign the token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, err := token.SignedString(SecretKey)
+	if err != nil {
+		log.Println("Error signing token:", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the signed token
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"token": signedToken,
+	})
 }
 
 func Register(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	var req models.User
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		http.Error(w, "unable to decode register request", http.StatusBadRequest)
 		return
 	}
 
@@ -94,6 +155,26 @@ func CreateNewUser(db *sql.DB, user models.HashedUser) bool {
 	}
 
 	return true
+}
+
+func FetchUser(db *sql.DB, email string) (*models.HashedUser, error) {
+	var resp models.HashedUser
+	fetch_user_query := `
+		SELECT email,password,role FROM 
+		users WHERE 
+		email = $1;
+	`
+	err := db.QueryRow(fetch_user_query, email).Scan(&resp.Email, &resp.HashedPassword, &resp.Role)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Println("No user found with the given email")
+			return nil, nil // No user found
+		}
+		log.Println("Error fetching user during login:", err)
+		return nil, err
+	}
+
+	return &resp, nil
 }
 
 func validatePassword(password string) bool {

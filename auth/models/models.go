@@ -11,3 +11,8 @@ type HashedUser struct {
 	HashedPassword string `json:"hashed_password"`
 	Role           string `json:"role"`
 }
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
