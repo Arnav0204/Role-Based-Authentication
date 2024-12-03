@@ -1,13 +1,16 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
 	models "role-based-auth/auth/models"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -189,4 +192,89 @@ func validatePassword(password string) bool {
 	}
 
 	return re
+}
+
+func UserAccessibleContent(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("you are user and and can access this content"))
+}
+
+func AdminAccessibleContent(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("you are admin and and can access this content"))
+}
+
+// JWTMiddleware verifies and decodes a JWT token
+func JWTMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("JWTMiddleware triggered")
+		// Extract the token from the Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header missing", http.StatusUnauthorized)
+			return
+		}
+		log.Println("Authorization header:", authHeader)
+		// Assumes "Bearer <token>"
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			return
+		}
+		tokenString := parts[1]
+		log.Println(tokenString)
+		// Parse and validate the token
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			// Validate the signing method
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, errors.New("unexpected signing method")
+			}
+			return SecretKey, nil
+		})
+
+		if err != nil {
+			log.Println("Token parsing error:", err)
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract claims and pass them to the next handler
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			// Pass claims to context
+			ctx := context.WithValue(r.Context(), "claims", claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		} else {
+			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		}
+	})
+}
+
+// Access control middleware
+func AccessControlMiddleware(allowedRoles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract claims from context (set by JWT middleware)
+			claims, ok := r.Context().Value("claims").(jwt.MapClaims)
+			if !ok {
+				http.Error(w, "Unauthorized: invalid token data", http.StatusUnauthorized)
+				return
+			}
+
+			// Get the role from the claims
+			role, ok := claims["role"].(string)
+			if !ok {
+				http.Error(w, "Unauthorized: role not found in token", http.StatusUnauthorized)
+				return
+			}
+
+			// Check if the user's role is in the allowed roles
+			for _, allowedRole := range allowedRoles {
+				if role == allowedRole {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// If no match, deny access
+			http.Error(w, "Forbidden: insufficient permissions", http.StatusForbidden)
+		})
+	}
 }

@@ -43,6 +43,22 @@ func RegisterRoutes(db *sql.DB) *mux.Router {
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		utils.Register(db, w, r)
 	}).Methods("POST")
+
+	//r.HandleFunc("/userinfo", utils.UserAccessibleContent).Methods("GET")
+	//r.HandleFunc("/admininfo", utils.AdminAccessibleContent).Methods("GET")
+
+	r.Handle("/userinfo", chainMiddleware(
+		utils.UserAccessibleContent, // Actual handler                  // JWT verification middleware
+		utils.AccessControlMiddleware("user"),
+		utils.JWTMiddleware, // Role verification middleware
+	)).Methods("GET")
+
+	r.Handle("/admininfo", chainMiddleware(
+		utils.AdminAccessibleContent, // Actual handler
+		utils.AccessControlMiddleware("admin"),
+		utils.JWTMiddleware, // JWT verification middleware
+		// Role verification middleware
+	)).Methods("GET")
 	return r
 }
 
@@ -56,5 +72,11 @@ func CreateTables(db *sql.DB) {
 		);
 	`
 	db.Exec(create_users_table_query)
+}
 
+func chainMiddleware(handler http.HandlerFunc, middlewares ...func(http.Handler) http.Handler) http.Handler {
+	for _, middleware := range middlewares {
+		handler = middleware(handler).ServeHTTP
+	}
+	return handler
 }
