@@ -19,3 +19,11 @@ This is a RESTful API designed for role-based authentication and authorization, 
 ### Environment Variables
 
 Set up a `.env` file in the root directory similar to the `.env.example` file
+
+### Insatlling Dependencies
+
+Install all the dependencies using `go mod tidy` command in your root directory
+
+### Start Server
+
+Start your server on localhost usig  `go run main.go` command in your root directory
