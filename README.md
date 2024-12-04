@@ -27,3 +27,25 @@ Install all the dependencies using `go mod tidy` command in your root directory
 ### Start Server
 
 Start your server on localhost usig  `go run main.go` command in your root directory
+
+## Routes
+### Registering User
+`http://localhost:8080/register`
+`{
+  "email":"your_email",
+  "password":"your_password",
+  "role":"your_role"
+}`
+
+### Login User
+`http://localhost:8080/login`
+`{
+  "email":"your_email",
+  "password":"your_password"
+}`
+
+### User Permitted Route
+`http://localhost:8080/userinfo`
+
+### Admin Permitted Route
+`http://localhost:8080/admininfo`
